@@ -1,0 +1,9 @@
+.next
+node_modules
+.env
+dist
+coverage
+outputs/live-data.json
+outputs/payment-tracker-import.json
+outputs/*.log
+.vercel

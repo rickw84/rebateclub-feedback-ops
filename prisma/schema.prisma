@@ -1,0 +1,417 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MANAGER
+  PARTICIPANT
+}
+
+enum VerificationStatus {
+  NEW
+  PENDING_REVIEW
+  VERIFIED
+  REJECTED
+  BLOCKED
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum ApplicationStatus {
+  APPLIED
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  SUBMITTED
+  NEEDS_REVISION
+  APPROVED
+  REJECTED
+  OVERDUE
+  CANCELED
+}
+
+enum SubmissionDecision {
+  PENDING
+  APPROVED
+  REJECTED
+  NEEDS_REVISION
+}
+
+enum PayoutStatus {
+  DRAFT
+  QUEUED
+  SENT
+  PAID
+  FAILED
+  REVERSED
+  DISPUTED
+  CANCELED
+}
+
+enum PayoutBatchType {
+  BASE_REIMBURSEMENT
+  BONUS
+  ADJUSTMENT
+  MIXED
+}
+
+enum CommunicationChannel {
+  EMAIL
+  IN_APP
+  MANUAL
+}
+
+enum CommunicationTemplate {
+  VERIFICATION_REQUEST
+  VERIFICATION_CONFIRMED
+  ASSIGNMENT_SENT
+  SUBMISSION_REVISION_REQUEST
+  PAYOUT_CONFIRMED
+  FOLLOW_UP
+  SUPPORT
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model Organization {
+  id           String      @id @default(cuid())
+  name         String
+  slug         String      @unique
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  users        User[]
+  campaigns    Campaign[]
+  products     Product[]
+  auditLogs    AuditLog[]
+  communications Communication[]
+}
+
+model User {
+  id                 String              @id @default(cuid())
+  organizationId     String
+  role               UserRole
+  name               String
+  email              String              @unique
+  passwordHash       String?
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  organization       Organization        @relation(fields: [organizationId], references: [id])
+  participantProfile ParticipantProfile?
+  createdCampaigns   Campaign[]          @relation("CampaignCreatedBy")
+  decidedApplications Application[]      @relation("ApplicationDecidedBy")
+  assignedAssignments Assignment[]       @relation("AssignmentAssignedBy")
+  reviewedSubmissions Submission[]       @relation("SubmissionReviewedBy")
+  createdPayouts     Payout[]            @relation("PayoutCreatedBy")
+  createdPayoutBatches PayoutBatch[]     @relation("PayoutBatchCreatedBy")
+  communications     Communication[]     @relation("CommunicationSentBy")
+  auditLogs          AuditLog[]
+
+  @@index([organizationId, role])
+}
+
+model ParticipantProfile {
+  id                      String               @id @default(cuid())
+  userId                  String               @unique
+  displayName             String
+  paypalEmail             String?
+  country                 String?
+  marketplace             String?
+  niches                  Json
+  bio                     String?
+  avatarUrl               String?
+  amazonProfileUrl        String?
+  verificationScreenshotUrl String?
+  verificationStatus      VerificationStatus   @default(NEW)
+  riskLevel               RiskLevel            @default(MEDIUM)
+  score                   Int                  @default(70)
+  totalAssignments        Int                  @default(0)
+  completedAssignments    Int                  @default(0)
+  approvedAssignments     Int                  @default(0)
+  onTimeAssignments       Int                  @default(0)
+  noShowCount             Int                  @default(0)
+  disputeCount            Int                  @default(0)
+  notes                   String?
+  lastVerifiedAt          DateTime?
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+  user                    User                 @relation(fields: [userId], references: [id])
+  applications            Application[]
+  assignments             Assignment[]
+  submissions             Submission[]
+  payouts                 Payout[]
+  payoutBatches           PayoutBatch[]
+  communications          Communication[]
+
+  @@index([verificationStatus, riskLevel])
+  @@index([score])
+}
+
+model Product {
+  id             String            @id @default(cuid())
+  organizationId String
+  brandName      String?
+  asin           String
+  title          String
+  amazonUrl      String?
+  marketplace    String
+  imageUrl       String?
+  category       String?
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  campaignLinks  CampaignProduct[]
+  applications   Application[]
+  assignments    Assignment[]
+
+  @@unique([organizationId, asin, marketplace])
+  @@index([organizationId, title])
+}
+
+model Campaign {
+  id                  String            @id @default(cuid())
+  organizationId      String
+  createdById         String
+  name                String
+  clientName          String?
+  description         String?
+  status              CampaignStatus    @default(DRAFT)
+  participantLimit    Int?
+  rewardAmount        Decimal?
+  rewardCurrency      String            @default("USD")
+  deliverables        Json
+  eligibilityRules    Json?
+  startDate           DateTime?
+  endDate             DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  organization        Organization      @relation(fields: [organizationId], references: [id])
+  createdBy           User              @relation("CampaignCreatedBy", fields: [createdById], references: [id])
+  products            CampaignProduct[]
+  applications        Application[]
+  assignments         Assignment[]
+  payoutBatches       PayoutBatch[]
+
+  @@index([organizationId, status])
+  @@index([startDate, endDate])
+}
+
+model CampaignProduct {
+  id              String    @id @default(cuid())
+  campaignId      String
+  productId       String
+  basketCode      String?
+  quantityTarget  Int?
+  assignmentLimit Int?
+  createdAt       DateTime  @default(now())
+  campaign        Campaign  @relation(fields: [campaignId], references: [id])
+  product         Product   @relation(fields: [productId], references: [id])
+
+  @@unique([campaignId, productId])
+  @@index([basketCode])
+}
+
+model Application {
+  id                String             @id @default(cuid())
+  campaignId        String
+  productId         String
+  participantId     String
+  status            ApplicationStatus  @default(APPLIED)
+  selectionNotes    String?
+  adminNotes        String?
+  appliedAt         DateTime           @default(now())
+  decisionAt        DateTime?
+  decidedById       String?
+  campaign          Campaign           @relation(fields: [campaignId], references: [id])
+  product           Product            @relation(fields: [productId], references: [id])
+  participant       ParticipantProfile @relation(fields: [participantId], references: [id])
+  decidedBy         User?              @relation("ApplicationDecidedBy", fields: [decidedById], references: [id])
+  assignment        Assignment?
+
+  @@unique([campaignId, productId, participantId])
+  @@index([status, appliedAt])
+  @@index([participantId, status])
+}
+
+model Assignment {
+  id                    String               @id @default(cuid())
+  campaignId            String
+  productId             String
+  participantId         String
+  applicationId         String?              @unique
+  assignedById          String?
+  status                AssignmentStatus     @default(ASSIGNED)
+  baseRewardAmount      Decimal?
+  bonusRewardAmount     Decimal?
+  rewardCurrency        String               @default("USD")
+  assignedAt            DateTime             @default(now())
+  acceptedAt            DateTime?
+  dueAt                 DateTime?
+  submittedAt           DateTime?
+  approvedAt            DateTime?
+  lastFollowUpAt        DateTime?
+  followUpCount         Int                  @default(0)
+  sourceLabel           String?
+  clientBillingLabel    String?
+  purchaseSubtotal      Decimal?
+  taxAdjustmentAmount   Decimal?
+  miscAdjustmentAmount  Decimal?
+  internalNotes         String?
+  deliverableSnapshot   Json
+  campaign              Campaign             @relation(fields: [campaignId], references: [id])
+  product               Product              @relation(fields: [productId], references: [id])
+  participant           ParticipantProfile   @relation(fields: [participantId], references: [id])
+  application           Application?         @relation(fields: [applicationId], references: [id])
+  assignedBy            User?                @relation("AssignmentAssignedBy", fields: [assignedById], references: [id])
+  submissions           Submission[]
+  payouts               Payout[]
+  communications        Communication[]
+
+  @@unique([campaignId, productId, participantId])
+  @@index([status, dueAt])
+  @@index([participantId, status])
+}
+
+model Submission {
+  id                 String              @id @default(cuid())
+  assignmentId       String
+  submittedById      String
+  version            Int                 @default(1)
+  questionnaireData  Json?
+  attachmentUrls     Json?
+  externalLinks      Json?
+  adminNotes         String?
+  decision           SubmissionDecision  @default(PENDING)
+  reviewedAt         DateTime?
+  reviewedById       String?
+  submittedAt        DateTime            @default(now())
+  assignment         Assignment          @relation(fields: [assignmentId], references: [id])
+  submittedBy        ParticipantProfile  @relation(fields: [submittedById], references: [id])
+  reviewedBy         User?               @relation("SubmissionReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([assignmentId, submittedAt])
+  @@index([decision, reviewedAt])
+}
+
+model Payout {
+  id                    String             @id @default(cuid())
+  payoutBatchId         String?
+  assignmentId          String
+  participantId         String
+  createdById           String?
+  status                PayoutStatus       @default(DRAFT)
+  payoutType            String
+  amount                Decimal
+  feeAmount             Decimal?
+  currency              String             @default("USD")
+  recipientEmail        String?
+  provider              String             @default("PAYPAL")
+  providerBatchId       String?
+  providerItemId        String?
+  providerReference     String?
+  proofImageUrl         String?
+  failureReason         String?
+  scheduledAt           DateTime?
+  sentAt                DateTime?
+  settledAt             DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  payoutBatch          PayoutBatch?        @relation(fields: [payoutBatchId], references: [id])
+  assignment           Assignment          @relation(fields: [assignmentId], references: [id])
+  participant          ParticipantProfile  @relation(fields: [participantId], references: [id])
+  createdBy            User?               @relation("PayoutCreatedBy", fields: [createdById], references: [id])
+
+  @@index([status, scheduledAt])
+  @@index([participantId, status])
+  @@index([payoutBatchId])
+  @@index([providerBatchId, providerItemId])
+}
+
+model PayoutBatch {
+  id                 String          @id @default(cuid())
+  campaignId         String?
+  participantId      String
+  createdById        String?
+  batchType          PayoutBatchType @default(MIXED)
+  provider           String          @default("PAYPAL")
+  providerBatchId    String?
+  recipientEmail     String?
+  sourceLabel        String?
+  fullPaymentDate    DateTime?
+  totalAmount        Decimal
+  totalFeeAmount     Decimal?
+  proofImageUrl      String?
+  notes              String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  campaign           Campaign?       @relation(fields: [campaignId], references: [id])
+  participant        ParticipantProfile @relation(fields: [participantId], references: [id])
+  createdBy          User?           @relation("PayoutBatchCreatedBy", fields: [createdById], references: [id])
+  payouts            Payout[]
+
+  @@index([participantId, fullPaymentDate])
+  @@index([campaignId, sourceLabel])
+  @@index([providerBatchId])
+}
+
+model Communication {
+  id               String                @id @default(cuid())
+  organizationId   String
+  participantId    String?
+  assignmentId     String?
+  sentById         String?
+  channel          CommunicationChannel
+  template         CommunicationTemplate?
+  subject          String?
+  body             String?
+  sentAt           DateTime?
+  externalMessageId String?
+  metadata         Json?
+  createdAt        DateTime              @default(now())
+  organization     Organization          @relation(fields: [organizationId], references: [id])
+  participant      ParticipantProfile?   @relation(fields: [participantId], references: [id])
+  assignment       Assignment?           @relation(fields: [assignmentId], references: [id])
+  sentBy           User?                 @relation("CommunicationSentBy", fields: [sentById], references: [id])
+
+  @@index([participantId, createdAt])
+  @@index([assignmentId, createdAt])
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  actorUserId    String?
+  entityType     String
+  entityId       String
+  action         String
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  actorUser      User?        @relation(fields: [actorUserId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([entityType, entityId, createdAt])
+}
