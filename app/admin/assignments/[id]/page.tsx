@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
+import { AssignmentOpportunitySummaryForm } from "@/components/assignment-opportunity-summary-form";
 import { getServerSession } from "@/lib/auth";
 import { getAssignmentOpportunityDetailData } from "@/lib/dashboard-data";
 
@@ -45,53 +46,12 @@ export default async function AssignmentOpportunityDetailPage({
             <div>
               <div className="rk-section-title">Assignment opportunity summary</div>
               <p className="muted">
-                This is the grouped parent record for one review opportunity.
+                Edit the grouped parent record for this review opportunity here.
               </p>
             </div>
           </div>
 
-          <div className="rk-detail-grid">
-            <div className="rk-detail-item">
-              <span>Request date</span>
-              <strong>{detail.requestDateLabel}</strong>
-            </div>
-            <div className="rk-detail-item">
-              <span>Name</span>
-              <strong>{detail.participantName}</strong>
-            </div>
-            <div className="rk-detail-item">
-              <span>Email</span>
-              <strong>{detail.email}</strong>
-            </div>
-            <div className="rk-detail-item">
-              <span>PayPal</span>
-              <strong>{detail.paypalEmail}</strong>
-            </div>
-            <div className="rk-detail-item">
-              <span>Newsletter campaign</span>
-              <strong>{detail.newsletterCampaign}</strong>
-            </div>
-            <div className="rk-detail-item">
-              <span>Status</span>
-              <strong>{detail.status}</strong>
-            </div>
-            <div className="rk-detail-item">
-              <span>Total product cost</span>
-              <strong>{detail.totalProductCostLabel}</strong>
-            </div>
-            <div className="rk-detail-item">
-              <span>Total cost + PP fee</span>
-              <strong>{detail.totalCostWithFeeLabel}</strong>
-            </div>
-            <div className="rk-detail-item">
-              <span>Commission total</span>
-              <strong>{detail.commissionTotalLabel}</strong>
-            </div>
-            <div className="rk-detail-item">
-              <span>Full payment date</span>
-              <strong>{detail.fullPaymentDateLabel}</strong>
-            </div>
-          </div>
+          <AssignmentOpportunitySummaryForm detail={detail} />
         </article>
 
         <div className="grid-two">

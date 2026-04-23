@@ -49,6 +49,22 @@ function slugify(value: string) {
     .slice(0, 36);
 }
 
+export function buildOpportunityGroupId(
+  participantId: string | null | undefined,
+  campaignId: string | null | undefined,
+  newsletterCampaign: string | null | undefined,
+  requestDate: string | Date | null | undefined
+) {
+  const groupKey = [
+    participantId ?? "unknown-participant",
+    campaignId ?? "unknown-campaign",
+    newsletterCampaign ?? "Unassigned",
+    asDateKey(requestDate)
+  ].join("__");
+
+  return `opp_${slugify(groupKey)}`;
+}
+
 function firstDate(...values: Array<string | Date | null | undefined>) {
   for (const value of values) {
     if (value) {
@@ -129,9 +145,10 @@ export function buildPayoutOpportunityRows(
     if (!group) {
       group = {
         key: groupKey,
-        id: `opp_${slugify(groupKey)}`,
+        id: buildOpportunityGroupId(record.participant?.id ?? record.payout?.participantId ?? null, record.campaign?.id ?? record.assignment?.campaignId ?? null, newsletterCampaign, requestDate),
         requestDate,
         participantId: record.participant?.id ?? record.payout?.participantId ?? null,
+        campaignId: record.campaign?.id ?? record.assignment?.campaignId ?? null,
         participantName:
           record.participant?.displayName ??
           record.user?.name ??
@@ -261,6 +278,8 @@ export function buildPayoutOpportunityRows(
       id: group.id,
       requestDate: group.requestDate,
       requestDateLabel: formatDate(group.requestDate),
+      participantId: group.participantId,
+      campaignId: group.campaignId,
       participantName: group.participantName,
       email: group.email,
       paypalEmail: group.paypalEmail,
@@ -376,3 +395,8 @@ export function findPayoutOpportunityDetail(
   const grouped = buildPayoutOpportunityRows(sourceRecords);
   return grouped.rows.find((row) => row.id === id) ?? null;
 }
+
+
+
+
+

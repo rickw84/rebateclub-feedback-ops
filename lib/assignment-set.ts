@@ -5,16 +5,22 @@ export type AssignmentSetLineItem = {
   productTitle: string;
   productCost: string;
   productLink: string;
-  ppFee: string;
+  reviewProductLink: string;
+};
+
+export type AssignmentSetPayments = {
   totalProductCost: string;
+  ppFee: string;
   totalCostWithFee: string;
   commission: string;
-  reviewProductLink: string;
+  commissionMisc: string;
+  totalCommission: string;
 };
 
 export type AssignmentSetActionState = {
   status: "idle" | "success" | "error";
   message?: string;
+  flashAssignmentId?: string;
 };
 
 export const initialAssignmentSetActionState: AssignmentSetActionState = {
@@ -83,36 +89,41 @@ export function normalizeMoneyInput(value: string | undefined, fallback = "0.00"
 }
 
 export function normalizeLineItem(raw: Partial<AssignmentSetLineItem>) {
-  const productCost = normalizeMoneyInput(raw.productCost);
+  return {
+    brand: raw.brand?.trim() ?? "",
+    productTitle: raw.productTitle?.trim() ?? "",
+    productCost: normalizeMoneyInput(raw.productCost),
+    productLink: raw.productLink?.trim() ?? "",
+    reviewProductLink: raw.reviewProductLink?.trim() ?? ""
+  };
+}
+
+export function normalizePayments(raw: Partial<AssignmentSetPayments>) {
+  const totalProductCost = normalizeMoneyInput(raw.totalProductCost);
   const ppFee = normalizeMoneyInput(raw.ppFee);
-  const totalProductCost = normalizeMoneyInput(raw.totalProductCost, productCost);
   const totalCostWithFee = normalizeMoneyInput(
     raw.totalCostWithFee,
     (Number(totalProductCost) + Number(ppFee)).toFixed(2)
   );
   const commission = normalizeMoneyInput(raw.commission);
+  const commissionMisc = normalizeMoneyInput(raw.commissionMisc);
+  const totalCommission = normalizeMoneyInput(
+    raw.totalCommission,
+    (Number(commission) + Number(commissionMisc)).toFixed(2)
+  );
 
   return {
-    brand: raw.brand?.trim() ?? "",
-    productTitle: raw.productTitle?.trim() ?? "",
-    productCost,
-    productLink: raw.productLink?.trim() ?? "",
-    ppFee,
     totalProductCost,
+    ppFee,
     totalCostWithFee,
     commission,
-    reviewProductLink: raw.reviewProductLink?.trim() ?? ""
+    commissionMisc,
+    totalCommission
   };
 }
 
 export function isMeaningfulLineItem(item: AssignmentSetLineItem) {
   return Boolean(item.productTitle || item.brand || item.productLink);
-}
-
-export function sumCommission(items: AssignmentSetLineItem[]) {
-  return items
-    .reduce((sum, item) => sum + Number(item.commission ?? 0), 0)
-    .toFixed(2);
 }
 
 export function mapOpportunityStatusToAssignmentStatus(status: OpportunityStatus) {
@@ -129,3 +140,4 @@ export function mapOpportunityStatusToAssignmentStatus(status: OpportunityStatus
       return "ASSIGNED";
   }
 }
+

@@ -1016,3 +1016,227 @@ button:disabled {
     flex-direction: column;
   }
 }
+
+
+.rk-modal-top-row {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 12px;
+}
+
+.rk-modal-section--top {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.rk-modal-grid--payments {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rk-modal-grid--assignment {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rk-modal-form,
+.rk-modal-section,
+.rk-product-stack {
+  gap: 12px;
+}
+
+.rk-modal-grid {
+  gap: 10px;
+}
+
+.rk-modal-section-title {
+  font-size: 0.92rem;
+}
+
+.rk-modal-card .field {
+  gap: 5px;
+  font-size: 0.82rem;
+}
+
+.rk-modal-card .field input,
+.rk-modal-card .field select,
+.rk-modal-card .field textarea {
+  min-height: 34px;
+  padding: 8px 10px;
+}
+
+.rk-product-card {
+  padding: 14px;
+}
+
+@media (max-width: 1080px) {
+  .rk-modal-top-row,
+  .rk-modal-grid--assignment,
+  .rk-modal-grid--payments,
+  .rk-modal-grid--product {
+    grid-template-columns: 1fr;
+  }
+}
+
+.rk-modal-top-row {
+  gap: 10px;
+}
+
+.rk-modal-section--top {
+  padding: 12px;
+}
+
+.rk-modal-form,
+.rk-modal-section,
+.rk-product-stack {
+  gap: 10px;
+}
+
+.rk-modal-grid {
+  gap: 8px;
+}
+
+.rk-modal-section-title {
+  font-size: 0.84rem;
+}
+
+.rk-modal-card .field {
+  gap: 4px;
+  font-size: 0.75rem;
+}
+
+.rk-modal-card .field input,
+.rk-modal-card .field select,
+.rk-modal-card .field textarea {
+  min-height: 28px;
+  padding: 6px 8px;
+}
+
+.rk-product-card {
+  padding: 12px;
+}
+
+.rk-modal-grid--payments {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.rk-payment-group {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fffaf5;
+}
+
+.rk-payment-group__title {
+  color: var(--text-strong);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rk-payment-group__fields {
+  display: grid;
+  gap: 8px;
+}
+
+@media (max-width: 1080px) {
+  .rk-modal-grid--payments {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Assignment modal top-row cleanup */
+.rk-modal-top-row {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.rk-modal-section--top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: start;
+  min-height: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.rk-modal-section--top .rk-modal-section-title {
+  margin: 0;
+  line-height: 1.1;
+}
+
+.rk-modal-section--top .rk-modal-grid {
+  gap: 8px;
+  align-content: start;
+}
+
+.rk-modal-grid--assignment,
+.rk-modal-grid--payments {
+  align-items: start;
+}
+
+.rk-payment-group {
+  gap: 6px;
+  padding: 8px;
+}
+
+.rk-payment-group__fields {
+  gap: 6px;
+}
+
+@media (max-width: 1080px) {
+  .rk-modal-top-row,
+  .rk-modal-grid--payments,
+  .rk-modal-grid--assignment {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Assignment row flash */
+@keyframes rk-row-flash-pulse {
+  0% {
+    background: #fff2c8;
+  }
+
+  75% {
+    background: #fff2c8;
+  }
+
+  100% {
+    background: transparent;
+  }
+}
+
+.rk-row-flash td {
+  animation: rk-row-flash-pulse 5s ease-out forwards;
+}
+.rk-detail-form {
+  display: grid;
+  gap: 16px;
+}
+
+.rk-detail-grid--form .rk-detail-field {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.rk-detail-grid--form .rk-detail-field span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.rk-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+}

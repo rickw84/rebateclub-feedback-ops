@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/app-shell";
 import { AssignmentSetModal } from "@/components/assignment-set-modal";
+import { FlashQueryCleaner } from "@/components/flash-query-cleaner";
 import { PaginationControls } from "@/components/pagination-controls";
 import { ProgressLink } from "@/components/progress-link";
 import { QueryForm } from "@/components/query-form";
@@ -16,6 +17,7 @@ type AssignmentsPageProps = {
     dir?: string;
     page?: string;
     pageSize?: string;
+    flash?: string;
   }>;
 };
 
@@ -48,6 +50,7 @@ export default async function AssignmentsPage({ searchParams }: AssignmentsPageP
   const session = await getServerSession();
   const params = (await searchParams) ?? {};
   const listing = await getAssignmentOpportunityListingData(params);
+  const flashAssignmentId = params.flash ?? "";
 
   const statusTabs = [
     { label: "All Assignments", status: "", count: listing.tabs.all },
@@ -79,6 +82,8 @@ export default async function AssignmentsPage({ searchParams }: AssignmentsPageP
           <span>/</span>
           <strong>Assignments</strong>
         </div>
+
+        {flashAssignmentId ? <FlashQueryCleaner delayMs={5000} queryKey="flash" /> : null}
 
         <article className="rk-panel">
           <div className="rk-panel-header">
@@ -187,7 +192,7 @@ export default async function AssignmentsPage({ searchParams }: AssignmentsPageP
               <tbody>
                 {listing.rows.length ? (
                   listing.rows.map((row) => (
-                    <tr key={row.id}>
+                    <tr className={row.id === flashAssignmentId ? "rk-row-flash" : undefined} key={row.id}>
                       <td>{row.requestDateLabel}</td>
                       <td>
                         <ProgressLink className="rk-id-link" href={`/admin/assignments/${encodeURIComponent(row.id)}`}>
@@ -233,3 +238,4 @@ export default async function AssignmentsPage({ searchParams }: AssignmentsPageP
     </AppShell>
   );
 }
+

@@ -1,12 +1,14 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ActionForm } from "@/components/action-form";
 import { SubmitButton } from "@/components/submit-button";
 import {
   AssignmentSetLineItem,
+  AssignmentSetPayments,
   initialAssignmentSetActionState,
-  sumCommission
+  normalizeMoneyInput
 } from "@/lib/assignment-set";
 import { createAssignmentSetAction } from "@/app/admin/actions";
 
@@ -31,10 +33,6 @@ function emptyLineItem(): AssignmentSetLineItem {
     productTitle: "",
     productCost: "",
     productLink: "",
-    ppFee: "",
-    totalProductCost: "",
-    totalCostWithFee: "",
-    commission: "",
     reviewProductLink: ""
   };
 }
@@ -52,22 +50,66 @@ function defaultDetails(): AssignmentDetails {
   };
 }
 
+function defaultPayments(): AssignmentSetPayments {
+  return {
+    totalProductCost: "",
+    ppFee: "",
+    totalCostWithFee: "0.00",
+    commission: "",
+    commissionMisc: "",
+    totalCommission: "0.00"
+  };
+}
+
 export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
   const [details, setDetails] = useState<AssignmentDetails>(defaultDetails);
+  const [payments, setPayments] = useState<AssignmentSetPayments>(defaultPayments);
   const [lineItems, setLineItems] = useState<AssignmentSetLineItem[]>([emptyLineItem()]);
   const [state, formAction, pending] = useActionState(
     createAssignmentSetAction,
     initialAssignmentSetActionState
   );
 
+  const derivedPayments = useMemo(() => {
+    const totalProductCost = lineItems
+      .reduce((sum, item) => sum + Number(normalizeMoneyInput(item.productCost)), 0)
+      .toFixed(2);
+    const ppFee = normalizeMoneyInput(payments.ppFee);
+    const commission = normalizeMoneyInput(payments.commission);
+    const commissionMisc = normalizeMoneyInput(payments.commissionMisc);
+
+    return {
+      totalProductCost,
+      ppFee,
+      totalCostWithFee: (Number(totalProductCost) + Number(ppFee)).toFixed(2),
+      commission,
+      commissionMisc,
+      totalCommission: (Number(commission) + Number(commissionMisc)).toFixed(2)
+    };
+  }, [lineItems, payments]);
+
   useEffect(() => {
     if (state.status === "success") {
       setOpen(false);
       setDetails(defaultDetails());
+      setPayments(defaultPayments());
       setLineItems([emptyLineItem()]);
+
+      if (state.flashAssignmentId) {
+        const nextParams = new URLSearchParams(searchParams.toString());
+        nextParams.set("flash", state.flashAssignmentId);
+        const nextQuery = nextParams.toString();
+        const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+        router.replace(nextUrl, { scroll: false });
+      } else {
+        router.refresh();
+      }
     }
-  }, [state.status]);
+  }, [pathname, router, searchParams, state.flashAssignmentId, state.status]);
 
   useEffect(() => {
     if (!open) {
@@ -91,6 +133,13 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
     }));
   };
 
+  const updatePayment = (key: keyof AssignmentSetPayments, value: string) => {
+    setPayments((current) => ({
+      ...current,
+      [key]: value
+    }));
+  };
+
   const updateLineItem = (index: number, key: keyof AssignmentSetLineItem, value: string) => {
     setLineItems((current) =>
       current.map((item, itemIndex) =>
@@ -109,7 +158,9 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
   };
 
   const removeLineItem = (index: number) => {
-    setLineItems((current) => (current.length === 1 ? current : current.filter((_, itemIndex) => itemIndex !== index)));
+    setLineItems((current) =>
+      current.length === 1 ? current : current.filter((_, itemIndex) => itemIndex !== index)
+    );
   };
 
   return (
@@ -151,101 +202,151 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
             </div>
 
             <ActionForm action={formAction} className="rk-modal-form">
-              <div className="rk-modal-section">
-                <div className="rk-modal-section-title">Assignment details</div>
-                <div className="rk-modal-grid rk-modal-grid--assignment">
-                  <label className="field">
-                    Status
-                    <select
-                      name="opportunityStatus"
-                      onChange={(event) => updateDetail("opportunityStatus", event.target.value)}
-                      value={details.opportunityStatus}
-                    >
-                      <option value="DRAFT">Needs approval</option>
-                      <option value="SENT">Sent</option>
-                      <option value="PAID">Paid</option>
-                      <option value="FAILED">Failed</option>
-                      <option value="CANCELED">Canceled</option>
-                    </select>
-                  </label>
-                  <label className="field">
-                    Request Date
-                    <input
-                      name="requestDate"
-                      onChange={(event) => updateDetail("requestDate", event.target.value)}
-                      type="date"
-                      value={details.requestDate}
-                    />
-                  </label>
-                  <label className="field">
-                    Name
-                    <input
-                      name="participantName"
-                      onChange={(event) => updateDetail("participantName", event.target.value)}
-                      placeholder="Jessica Stull"
-                      required
-                      value={details.participantName}
-                    />
-                  </label>
-                  <label className="field">
-                    Email
-                    <input
-                      name="participantEmail"
-                      onChange={(event) => updateDetail("participantEmail", event.target.value)}
-                      placeholder="jstull1689@gmail.com"
-                      required
-                      type="email"
-                      value={details.participantEmail}
-                    />
-                  </label>
-                  <label className="field">
-                    Paypal
-                    <input
-                      name="paypalEmail"
-                      onChange={(event) => updateDetail("paypalEmail", event.target.value)}
-                      placeholder="jstull689@gmail.com"
-                      value={details.paypalEmail}
-                    />
-                  </label>
-                  <label className="field">
-                    Newsletter Campaign
-                    <input
-                      list="assignment-campaign-suggestions"
-                      name="newsletterCampaign"
-                      onChange={(event) => updateDetail("newsletterCampaign", event.target.value)}
-                      placeholder="Week 52, 2025"
-                      required
-                      value={details.newsletterCampaign}
-                    />
-                  </label>
-                  <label className="field">
-                    Full Payment Date
-                    <input
-                      name="fullPaymentDate"
-                      onChange={(event) => updateDetail("fullPaymentDate", event.target.value)}
-                      type="date"
-                      value={details.fullPaymentDate}
-                    />
-                  </label>
-                  <label className="field">
-                    Commission Payment Made
-                    <input
-                      name="commissionPaymentDate"
-                      onChange={(event) => updateDetail("commissionPaymentDate", event.target.value)}
-                      type="date"
-                      value={details.commissionPaymentDate}
-                    />
-                  </label>
-                  <label className="field">
-                    Total Commission
-                    <input readOnly value={`$${sumCommission(lineItems)}`} />
-                  </label>
+              <div className="rk-modal-top-row">
+                <div className="rk-modal-section rk-modal-section--top">
+                  <div className="rk-modal-section-title">Assignment details</div>
+                  <div className="rk-modal-grid rk-modal-grid--assignment">
+                    <label className="field">
+                      Status
+                      <select
+                        name="opportunityStatus"
+                        onChange={(event) => updateDetail("opportunityStatus", event.target.value)}
+                        value={details.opportunityStatus}
+                      >
+                        <option value="DRAFT">Not Paid</option>
+                        <option value="FAILED">Assignment Not Completed (Block/Blacklist)</option>
+                        <option value="SENT">Product Payment Made</option>
+                        <option value="PAID">Assignment Completed (Review+Commission)</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      Request Date
+                      <input
+                        name="requestDate"
+                        onChange={(event) => updateDetail("requestDate", event.target.value)}
+                        type="date"
+                        value={details.requestDate}
+                      />
+                    </label>
+                    <label className="field">
+                      Name
+                      <input
+                        name="participantName"
+                        onChange={(event) => updateDetail("participantName", event.target.value)}
+                        placeholder="Jessica Stull"
+                        required
+                        value={details.participantName}
+                      />
+                    </label>
+                    <label className="field">
+                      Email
+                      <input
+                        name="participantEmail"
+                        onChange={(event) => updateDetail("participantEmail", event.target.value)}
+                        placeholder="jstull1689@gmail.com"
+                        required
+                        type="email"
+                        value={details.participantEmail}
+                      />
+                    </label>
+                    <label className="field">
+                      Paypal
+                      <input
+                        name="paypalEmail"
+                        onChange={(event) => updateDetail("paypalEmail", event.target.value)}
+                        placeholder="jstull689@gmail.com"
+                        value={details.paypalEmail}
+                      />
+                    </label>
+                    <label className="field">
+                      Newsletter Campaign
+                      <input
+                        list="assignment-campaign-suggestions"
+                        name="newsletterCampaign"
+                        onChange={(event) => updateDetail("newsletterCampaign", event.target.value)}
+                        placeholder="Week 52, 2025"
+                        required
+                        value={details.newsletterCampaign}
+                      />
+                    </label>
+
+                  </div>
+                  <datalist id="assignment-campaign-suggestions">
+                    {campaignSuggestions.map((campaign) => (
+                      <option key={campaign} value={campaign} />
+                    ))}
+                  </datalist>
                 </div>
-                <datalist id="assignment-campaign-suggestions">
-                  {campaignSuggestions.map((campaign) => (
-                    <option key={campaign} value={campaign} />
-                  ))}
-                </datalist>
+
+                <div className="rk-modal-section rk-modal-section--top">
+                  <div className="rk-modal-section-title">Payments</div>
+                  <div className="rk-modal-grid rk-modal-grid--payments">
+                    <div className="rk-payment-group">
+                      <div className="rk-payment-group__title">Product Payments</div>
+                      <div className="rk-payment-group__fields">
+                        <label className="field">
+                          Full Payment Date
+                          <input
+                            name="fullPaymentDate"
+                            onChange={(event) => updateDetail("fullPaymentDate", event.target.value)}
+                            type="date"
+                            value={details.fullPaymentDate}
+                          />
+                        </label>
+                        <label className="field">
+                          Total Product Cost
+                          <input readOnly value={derivedPayments.totalProductCost} />
+                        </label>
+                        <label className="field">
+                          PP Fee
+                          <input
+                            onChange={(event) => updatePayment("ppFee", event.target.value)}
+                            placeholder="1.14"
+                            value={payments.ppFee}
+                          />
+                        </label>
+                        <label className="field">
+                          Total Product Cost + PP Fee
+                          <input readOnly value={derivedPayments.totalCostWithFee} />
+                        </label>
+                      </div>
+                    </div>
+                    <div className="rk-payment-group">
+                      <div className="rk-payment-group__title">Commission Payments</div>
+                      <div className="rk-payment-group__fields">
+                        <label className="field">
+                          Commission Payment Made
+                          <input
+                            name="commissionPaymentDate"
+                            onChange={(event) => updateDetail("commissionPaymentDate", event.target.value)}
+                            type="date"
+                            value={details.commissionPaymentDate}
+                          />
+                        </label>
+                        <label className="field">
+                          Commission
+                          <input
+                            onChange={(event) => updatePayment("commission", event.target.value)}
+                            placeholder="10.59"
+                            value={payments.commission}
+                          />
+                        </label>
+                        <label className="field">
+                          Commission Misc
+                          <input
+                            onChange={(event) => updatePayment("commissionMisc", event.target.value)}
+                            placeholder="0.00"
+                            value={payments.commissionMisc}
+                          />
+                        </label>
+                        <label className="field">
+                          Total Commission
+                          <input readOnly value={derivedPayments.totalCommission} />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="rk-modal-section">
@@ -295,44 +396,12 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
                             value={item.productCost}
                           />
                         </label>
-                        <label className="field">
+                        <label className="field rk-product-grid-span">
                           Product Link
                           <input
                             onChange={(event) => updateLineItem(index, "productLink", event.target.value)}
                             placeholder="https://www.amazon.com/..."
                             value={item.productLink}
-                          />
-                        </label>
-                        <label className="field">
-                          PP Fee
-                          <input
-                            onChange={(event) => updateLineItem(index, "ppFee", event.target.value)}
-                            placeholder="1.14"
-                            value={item.ppFee}
-                          />
-                        </label>
-                        <label className="field">
-                          Total Product Cost
-                          <input
-                            onChange={(event) => updateLineItem(index, "totalProductCost", event.target.value)}
-                            placeholder="Leave blank to use product cost"
-                            value={item.totalProductCost}
-                          />
-                        </label>
-                        <label className="field">
-                          Total Product Cost + PP Fee
-                          <input
-                            onChange={(event) => updateLineItem(index, "totalCostWithFee", event.target.value)}
-                            placeholder="Leave blank to auto-calculate"
-                            value={item.totalCostWithFee}
-                          />
-                        </label>
-                        <label className="field">
-                          Commission
-                          <input
-                            onChange={(event) => updateLineItem(index, "commission", event.target.value)}
-                            placeholder="10.59"
-                            value={item.commission}
                           />
                         </label>
                         <label className="field rk-product-grid-span">
@@ -350,6 +419,7 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
               </div>
 
               <input name="lineItems" type="hidden" value={JSON.stringify(lineItems)} />
+              <input name="payments" type="hidden" value={JSON.stringify(derivedPayments)} />
 
               {state.status === "error" ? <div className="rk-form-error">{state.message}</div> : null}
 
@@ -368,3 +438,11 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
     </>
   );
 }
+
+
+
+
+
+
+
+
