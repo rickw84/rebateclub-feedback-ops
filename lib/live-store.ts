@@ -6,6 +6,7 @@ import {
   inferMarketplaceFromUrl,
   mapOpportunityStatusToAssignmentStatus,
   normalizeLineItem,
+  normalizeMoneyInput,
   normalizePayments,
   parseAmazonAsin,
   slugify
@@ -869,7 +870,7 @@ export async function createAssignmentSetLive(input: {
       purchaseSubtotal: lineItem.productCost,
       taxAdjustmentAmount: null,
       miscAdjustmentAmount: null,
-      internalNotes: null,
+      internalNotes: input.miscNotes ?? null,
       deliverableSnapshot: {
         source: "assignment-set-form",
         legacyRequestDate: input.requestDate ?? null,
@@ -1006,12 +1007,12 @@ export async function updateAssignmentOpportunitySummaryLive(input: {
   participantEmail: string;
   paypalEmail?: string;
   newsletterCampaign: string;
+  miscNotes?: string;
   opportunityStatus: string;
   fullPaymentDate?: string;
-  totalProductCost: string;
-  totalCostWithFee: string;
-  ppFee: string;
-  commissionTotal: string;
+  commissionPaymentDate?: string;
+  lineItems: Array<ReturnType<typeof normalizeLineItem>>;
+  payments: ReturnType<typeof normalizePayments>;
 }) {
   const store = await readLiveStore();
   const participant = store.participantProfiles.find((item) => item.id === input.participantId);
@@ -1042,95 +1043,255 @@ export async function updateAssignmentOpportunitySummaryLive(input: {
   campaign.deliverables = {
     ...(campaign.deliverables ?? {}),
     requestDate: input.requestDate,
-    payments: {
-      totalProductCost: input.totalProductCost,
-      ppFee: input.ppFee,
-      totalCostWithFee: input.totalCostWithFee,
-      commission: input.commissionTotal,
-      commissionMisc: "0.00",
-      totalCommission: input.commissionTotal
-    }
+    payments: input.payments
   };
   campaign.startDate = input.requestDate;
   campaign.updatedAt = new Date().toISOString();
 
-  const assignments = store.assignments.filter((item) => input.assignmentIds.includes(item.id));
-  if (!assignments.length) {
+  const orderedAssignments = input.assignmentIds
+    .map((assignmentId) => store.assignments.find((item) => item.id === assignmentId) ?? null)
+    .filter((assignment) => Boolean(assignment));
+
+  if (!orderedAssignments.length) {
     throw new Error("Assignment records not found.");
   }
 
-  for (const assignment of assignments) {
-    assignment.status = mapOpportunityStatusToAssignmentStatus(input.opportunityStatus as any);
-    assignment.assignedAt = input.requestDate;
-    assignment.approvedAt = ["SENT", "PAID"].includes(input.opportunityStatus)
-      ? input.fullPaymentDate ?? null
+  const now = new Date().toISOString();
+  const approvalDate = ["SENT", "PAID"].includes(input.opportunityStatus)
+    ? input.fullPaymentDate ?? null
+    : null;
+
+  let primaryAssignmentId = null;
+
+  for (const [index, lineItem] of input.lineItems.entries()) {
+    const existingAssignment = orderedAssignments[index] ?? null;
+    const marketplace = inferMarketplaceFromUrl(lineItem.productLink);
+    let product = existingAssignment
+      ? store.products.find((item) => item.id === existingAssignment.productId) ?? null
       : null;
+
+    if (product) {
+      product.brandName = lineItem.brand || null;
+      product.title = lineItem.productTitle || "Untitled product";
+      product.amazonUrl = lineItem.productLink || null;
+      product.marketplace = marketplace;
+      product.updatedAt = now;
+    } else {
+      const asin =
+        parseAmazonAsin(lineItem.productLink) ??
+        productAsinSeed(`${lineItem.brand}-${lineItem.productTitle}-${input.requestDate}-${index}`);
+      product = store.products.find(
+        (item) => item.organizationId === campaign.organizationId && item.asin === asin && item.marketplace === marketplace
+      );
+
+      if (!product) {
+        product = {
+          id: makeId("prd"),
+          organizationId: campaign.organizationId,
+          brandName: lineItem.brand || null,
+          asin,
+          title: lineItem.productTitle || "Untitled product",
+          amazonUrl: lineItem.productLink || null,
+          marketplace,
+          imageUrl: null,
+          category: null,
+          isActive: true,
+          createdAt: now,
+          updatedAt: now
+        };
+        store.products.unshift(product);
+      }
+    }
+
+    if (!store.campaignProducts.find((item) => item.campaignId === campaign.id && item.productId === product.id)) {
+      store.campaignProducts.unshift({
+        id: makeId("cpr"),
+        campaignId: campaign.id,
+        productId: product.id,
+        basketCode: null,
+        quantityTarget: null,
+        assignmentLimit: null,
+        createdAt: now
+      });
+    }
+
+    let assignment = existingAssignment;
+    if (!assignment) {
+      assignment = {
+        id: makeId("asn"),
+        campaignId: campaign.id,
+        productId: product.id,
+        participantId: participant.id,
+        applicationId: null,
+        assignedById: null,
+        status: "ASSIGNED",
+        baseRewardAmount: "0.00",
+        bonusRewardAmount: null,
+        rewardCurrency: "USD",
+        assignedAt: input.requestDate,
+        acceptedAt: null,
+        dueAt: null,
+        submittedAt: null,
+        approvedAt: null,
+        lastFollowUpAt: null,
+        followUpCount: 0,
+        sourceLabel: input.newsletterCampaign,
+        clientBillingLabel: null,
+        purchaseSubtotal: "0.00",
+        taxAdjustmentAmount: null,
+        miscAdjustmentAmount: null,
+        internalNotes: null,
+        deliverableSnapshot: {}
+      };
+      store.assignments.unshift(assignment);
+    }
+
+    assignment.productId = product.id;
+    assignment.status = mapOpportunityStatusToAssignmentStatus(input.opportunityStatus as any);
+    assignment.baseRewardAmount = lineItem.productCost;
+    assignment.purchaseSubtotal = lineItem.productCost;
+    assignment.assignedAt = input.requestDate;
+    assignment.submittedAt = lineItem.reviewProductLink ? input.requestDate : null;
+    assignment.approvedAt = approvalDate;
     assignment.sourceLabel = input.newsletterCampaign;
+    assignment.internalNotes = input.miscNotes ?? null;
     assignment.deliverableSnapshot = {
       ...(assignment.deliverableSnapshot ?? {}),
+      source: "assignment-set-form",
       legacyRequestDate: input.requestDate,
-      payments: {
-        totalProductCost: input.totalProductCost,
-        ppFee: input.ppFee,
-        totalCostWithFee: input.totalCostWithFee,
-        commission: input.commissionTotal,
-        commissionMisc: "0.00",
-        totalCommission: input.commissionTotal
-      }
+      productLink: lineItem.productLink || null,
+      reviewProductLink: lineItem.reviewProductLink || null,
+      payments: input.payments
     };
 
-    const submissions = store.submissions.filter((item) => item.assignmentId === assignment.id);
-    if (submissions.length) {
-      assignment.submittedAt = input.requestDate;
+    const existingSubmissions = store.submissions.filter((item) => item.assignmentId === assignment.id);
+    const [firstSubmission, ...extraSubmissions] = existingSubmissions;
+
+    if (lineItem.reviewProductLink) {
+      if (firstSubmission) {
+        firstSubmission.externalLinks = {
+          ...(firstSubmission.externalLinks ?? {}),
+          legacyReviewUrl: lineItem.reviewProductLink
+        };
+        firstSubmission.decision = ["SENT", "PAID"].includes(input.opportunityStatus) ? "APPROVED" : "PENDING";
+        firstSubmission.reviewedAt = approvalDate;
+        firstSubmission.reviewedById = null;
+        firstSubmission.submittedAt = input.requestDate;
+      } else {
+        store.submissions.unshift({
+          id: makeId("sub"),
+          assignmentId: assignment.id,
+          submittedById: participant.id,
+          version: 1,
+          questionnaireData: null,
+          attachmentUrls: [],
+          externalLinks: {
+            legacyReviewUrl: lineItem.reviewProductLink
+          },
+          adminNotes: null,
+          decision: ["SENT", "PAID"].includes(input.opportunityStatus) ? "APPROVED" : "PENDING",
+          reviewedAt: approvalDate,
+          reviewedById: null,
+          submittedAt: input.requestDate
+        });
+      }
+
+      if (extraSubmissions.length) {
+        const extraIds = new Set(extraSubmissions.map((submission) => submission.id));
+        store.submissions = store.submissions.filter((submission) => !extraIds.has(submission.id));
+      }
+    } else if (existingSubmissions.length) {
+      store.submissions = store.submissions.filter((submission) => submission.assignmentId !== assignment.id);
     }
 
-    for (const submission of submissions) {
-      submission.decision = ["SENT", "PAID"].includes(input.opportunityStatus) ? "APPROVED" : "PENDING";
-      submission.reviewedAt = ["SENT", "PAID"].includes(input.opportunityStatus)
-        ? input.fullPaymentDate ?? null
-        : null;
-      submission.submittedAt = input.requestDate;
+    if (!primaryAssignmentId) {
+      primaryAssignmentId = assignment.id;
     }
   }
+
+  if (!primaryAssignmentId) {
+    throw new Error("No assignment records were created.");
+  }
+
+  const removedAssignments = orderedAssignments.slice(input.lineItems.length);
+  if (removedAssignments.length) {
+    const removedIds = new Set(removedAssignments.map((assignment) => assignment.id));
+    for (const payout of store.payouts) {
+      if (input.payoutIds.includes(payout.id) && removedIds.has(payout.assignmentId)) {
+        payout.assignmentId = primaryAssignmentId;
+      }
+    }
+    store.submissions = store.submissions.filter((submission) => !removedIds.has(submission.assignmentId));
+    store.assignments = store.assignments.filter((assignment) => !removedIds.has(assignment.id));
+  }
+
+  participant.totalAssignments = store.assignments.filter((assignment) => assignment.participantId === participant.id).length;
 
   const basePaymentDate = input.fullPaymentDate ?? input.requestDate;
-  const payouts = store.payouts.filter((item) => input.payoutIds.includes(item.id));
-  const reimbursementPayouts = payouts.filter((item) => item.payoutType === "base_reimbursement");
-  const commissionPayouts = payouts.filter((item) => ["bonus_commission", "commission_misc"].includes(String(item.payoutType ?? "")));
+  const commissionPaymentDate = input.commissionPaymentDate ?? basePaymentDate;
 
-  if (reimbursementPayouts.length) {
-    const [first, ...rest] = reimbursementPayouts;
-    first.status = input.opportunityStatus;
-    first.amount = input.totalProductCost;
-    first.feeAmount = input.ppFee;
-    first.recipientEmail = input.paypalEmail ?? input.participantEmail;
-    first.scheduledAt = basePaymentDate;
-    first.sentAt = ["SENT", "PAID"].includes(input.opportunityStatus) ? basePaymentDate : null;
-    first.settledAt = input.opportunityStatus === "PAID" ? basePaymentDate : null;
-    first.failureReason = input.opportunityStatus === "FAILED" ? "Updated from assignment detail." : null;
-    first.updatedAt = new Date().toISOString();
+  const syncPayout = ({
+    payoutType,
+    amount,
+    feeAmount,
+    scheduledAt
+  }: {
+    payoutType: "base_reimbursement" | "bonus_commission" | "commission_misc";
+    amount: string;
+    feeAmount?: string;
+    scheduledAt: string;
+  }) => {
+    const matching = store.payouts.filter((payout) => input.payoutIds.includes(payout.id) && payout.payoutType === payoutType);
+    const normalizedAmount = normalizeMoneyInput(amount);
+    const normalizedFee = feeAmount === undefined ? undefined : normalizeMoneyInput(feeAmount);
+    const shouldKeep = Number(normalizedAmount) > 0 || Number(normalizedFee ?? 0) > 0;
+    const sentAt = ["SENT", "PAID"].includes(input.opportunityStatus) ? scheduledAt : null;
+    const settledAt = input.opportunityStatus === "PAID" ? scheduledAt : null;
+    const failureReason = input.opportunityStatus === "FAILED" ? "Updated from assignment detail." : null;
 
-    for (const payout of rest) {
-      payout.status = input.opportunityStatus;
-      payout.amount = "0.00";
-      payout.feeAmount = "0.00";
-      payout.recipientEmail = input.paypalEmail ?? input.participantEmail;
-      payout.sentAt = ["SENT", "PAID"].includes(input.opportunityStatus) ? basePaymentDate : null;
-      payout.settledAt = input.opportunityStatus === "PAID" ? basePaymentDate : null;
-      payout.failureReason = input.opportunityStatus === "FAILED" ? "Merged into grouped assignment total." : null;
-      payout.updatedAt = new Date().toISOString();
+    if (matching.length) {
+      const [first, ...rest] = matching;
+      first.assignmentId = primaryAssignmentId;
+      first.status = input.opportunityStatus;
+      first.amount = normalizedAmount;
+      first.feeAmount = payoutType === "base_reimbursement" ? normalizedFee ?? "0.00" : null;
+      first.recipientEmail = input.paypalEmail ?? input.participantEmail;
+      first.scheduledAt = scheduledAt;
+      first.sentAt = sentAt;
+      first.settledAt = settledAt;
+      first.failureReason = failureReason;
+      first.updatedAt = now;
+
+      for (const payout of rest) {
+        payout.assignmentId = primaryAssignmentId;
+        payout.status = input.opportunityStatus;
+        payout.amount = "0.00";
+        payout.feeAmount = payoutType === "base_reimbursement" ? "0.00" : null;
+        payout.recipientEmail = input.paypalEmail ?? input.participantEmail;
+        payout.scheduledAt = scheduledAt;
+        payout.sentAt = sentAt;
+        payout.settledAt = settledAt;
+        payout.failureReason = input.opportunityStatus === "FAILED" ? "Merged into grouped assignment total." : null;
+        payout.updatedAt = now;
+      }
+
+      return;
     }
-  } else if (Number(input.totalProductCost) > 0 || Number(input.ppFee) > 0) {
+
+    if (!shouldKeep) {
+      return;
+    }
+
     store.payouts.unshift({
       id: makeId("pay"),
       payoutBatchId: null,
-      assignmentId: assignments[0].id,
+      assignmentId: primaryAssignmentId,
       participantId: input.participantId,
       createdById: null,
       status: input.opportunityStatus,
-      payoutType: "base_reimbursement",
-      amount: input.totalProductCost,
-      feeAmount: input.ppFee,
+      payoutType,
+      amount: normalizedAmount,
+      feeAmount: payoutType === "base_reimbursement" ? normalizedFee ?? "0.00" : null,
       currency: "USD",
       recipientEmail: input.paypalEmail ?? input.participantEmail,
       provider: "PAYPAL",
@@ -1139,59 +1300,32 @@ export async function updateAssignmentOpportunitySummaryLive(input: {
       providerReference: null,
       proofImageUrl: null,
       failureReason: input.opportunityStatus === "FAILED" ? "Created from assignment detail." : null,
-      scheduledAt: basePaymentDate,
-      sentAt: ["SENT", "PAID"].includes(input.opportunityStatus) ? basePaymentDate : null,
-      settledAt: input.opportunityStatus === "PAID" ? basePaymentDate : null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      scheduledAt,
+      sentAt,
+      settledAt,
+      createdAt: now,
+      updatedAt: now
     });
-  }
+  };
 
-  if (commissionPayouts.length) {
-    const [firstCommission, ...restCommission] = commissionPayouts;
-    firstCommission.status = input.opportunityStatus;
-    firstCommission.amount = input.commissionTotal;
-    firstCommission.recipientEmail = input.paypalEmail ?? input.participantEmail;
-    firstCommission.sentAt = ["SENT", "PAID"].includes(input.opportunityStatus) ? basePaymentDate : null;
-    firstCommission.settledAt = input.opportunityStatus === "PAID" ? basePaymentDate : null;
-    firstCommission.failureReason = input.opportunityStatus === "FAILED" ? "Updated from assignment detail." : null;
-    firstCommission.updatedAt = new Date().toISOString();
+  syncPayout({
+    payoutType: "base_reimbursement",
+    amount: input.payments.totalProductCost,
+    feeAmount: input.payments.ppFee,
+    scheduledAt: basePaymentDate
+  });
 
-    for (const payout of restCommission) {
-      payout.status = input.opportunityStatus;
-      payout.amount = "0.00";
-      payout.recipientEmail = input.paypalEmail ?? input.participantEmail;
-      payout.sentAt = ["SENT", "PAID"].includes(input.opportunityStatus) ? basePaymentDate : null;
-      payout.settledAt = input.opportunityStatus === "PAID" ? basePaymentDate : null;
-      payout.failureReason = input.opportunityStatus === "FAILED" ? "Merged into grouped assignment total." : null;
-      payout.updatedAt = new Date().toISOString();
-    }
-  } else if (Number(input.commissionTotal) > 0) {
-    store.payouts.unshift({
-      id: makeId("pay"),
-      payoutBatchId: null,
-      assignmentId: assignments[0].id,
-      participantId: input.participantId,
-      createdById: null,
-      status: input.opportunityStatus,
-      payoutType: "bonus_commission",
-      amount: input.commissionTotal,
-      feeAmount: null,
-      currency: "USD",
-      recipientEmail: input.paypalEmail ?? input.participantEmail,
-      provider: "PAYPAL",
-      providerBatchId: null,
-      providerItemId: null,
-      providerReference: null,
-      proofImageUrl: null,
-      failureReason: input.opportunityStatus === "FAILED" ? "Created from assignment detail." : null,
-      scheduledAt: basePaymentDate,
-      sentAt: ["SENT", "PAID"].includes(input.opportunityStatus) ? basePaymentDate : null,
-      settledAt: input.opportunityStatus === "PAID" ? basePaymentDate : null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
-  }
+  syncPayout({
+    payoutType: "bonus_commission",
+    amount: input.payments.commission,
+    scheduledAt: commissionPaymentDate
+  });
+
+  syncPayout({
+    payoutType: "commission_misc",
+    amount: input.payments.commissionMisc,
+    scheduledAt: commissionPaymentDate
+  });
 
   await writeLiveStore(store);
   return {

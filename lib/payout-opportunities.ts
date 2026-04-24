@@ -173,6 +173,7 @@ export function buildPayoutOpportunityRows(
         assignmentRows: [] as Array<Record<string, any>>,
         basePaymentDates: [] as Array<string | Date>,
         commissionPaymentDates: [] as Array<string | Date>,
+        miscNotes: "",
         totalProductCost: 0,
         totalCostWithFee: 0,
         ppFeeTotal: 0,
@@ -208,6 +209,10 @@ export function buildPayoutOpportunityRows(
           0
       );
       group.totalProductCost += purchaseSubtotal;
+      if (!group.miscNotes && typeof record.assignment.internalNotes === "string" && record.assignment.internalNotes.trim().length) {
+        group.miscNotes = record.assignment.internalNotes.trim();
+      }
+
       group.assignmentRows.push({
         id: record.assignment.id,
         brandName: record.product?.brandName ?? "Unknown brand",
@@ -215,6 +220,7 @@ export function buildPayoutOpportunityRows(
         productLink: record.product?.amazonUrl ?? null,
         purchaseSubtotal,
         purchaseSubtotalLabel: formatMoney(purchaseSubtotal),
+        internalNotes: record.assignment.internalNotes ?? "",
         reviewLinks: submissionLinks
       });
     }
@@ -307,6 +313,7 @@ export function buildPayoutOpportunityRows(
       fullPaymentDateLabel: formatDate(fullPaymentDate?.toISOString() ?? null),
       commissionPaymentDate: commissionPaymentDate?.toISOString() ?? null,
       commissionPaymentDateLabel: formatDate(commissionPaymentDate?.toISOString() ?? null),
+      miscNotes: group.miscNotes,
       status,
       payoutRows: group.payoutRows,
       assignmentRows: group.assignmentRows

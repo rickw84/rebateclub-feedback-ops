@@ -748,7 +748,8 @@ button:disabled {
   background: #fffaf5;
 }
 
-.rk-product-grid-span {
+.rk-product-grid-span,
+.rk-modal-grid-span {
   grid-column: 1 / -1;
 }
 
@@ -1110,6 +1111,10 @@ button:disabled {
 .rk-modal-card .field textarea {
   min-height: 28px;
   padding: 6px 8px;
+}
+
+.rk-modal-card .field textarea {
+  min-height: 84px;
 }
 
 .rk-product-card {

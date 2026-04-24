@@ -22,7 +22,6 @@ import {
   parseAmazonAsin,
   slugify
 } from "@/lib/assignment-set";
-import { buildOpportunityGroupId } from "@/lib/payout-opportunities";
 import { getDatabaseUnavailableMessage, isLiveFallbackEnabled } from "@/lib/runtime-config";
 import { ensureSystemUser, getDefaultOrganizationId } from "@/lib/system-user";
 
@@ -226,6 +225,7 @@ export async function createAssignmentSetAction(
   const fullPaymentDate = value(formData, "fullPaymentDate");
   const commissionPaymentDate = value(formData, "commissionPaymentDate");
   const paypalEmail = value(formData, "paypalEmail") ?? participantEmail;
+  const miscNotes = value(formData, "miscNotes");
   const rawLineItems = value(formData, "lineItems");
   const rawPayments = value(formData, "payments");
 
@@ -265,6 +265,7 @@ export async function createAssignmentSetAction(
     participantEmail,
     paypalEmail,
     newsletterCampaign,
+    miscNotes,
     lineItems,
     payments
   };
@@ -418,6 +419,7 @@ export async function createAssignmentSetAction(
                   : null,
                 sourceLabel: payload.newsletterCampaign,
                 purchaseSubtotal: lineItem.productCost,
+                internalNotes: payload.miscNotes ?? null,
                 deliverableSnapshot: {
                   source: "assignment-set-form",
                   legacyRequestDate: payload.requestDate ?? null,
@@ -641,13 +643,14 @@ export async function updateAssignmentOpportunitySummaryAction(
   const participantEmail = value(formData, "participantEmail");
   const paypalEmail = value(formData, "paypalEmail") ?? participantEmail;
   const newsletterCampaign = value(formData, "newsletterCampaign");
+  const miscNotes = value(formData, "miscNotes");
   const opportunityStatus = (value(formData, "opportunityStatus") ?? "DRAFT").toUpperCase();
   const fullPaymentDate = value(formData, "fullPaymentDate");
+  const commissionPaymentDate = value(formData, "commissionPaymentDate");
   const assignmentIds = parseJsonIdList(value(formData, "assignmentIds"));
   const payoutIds = parseJsonIdList(value(formData, "payoutIds"));
-  const totalProductCost = normalizeMoneyInput(value(formData, "totalProductCost"));
-  const totalCostWithFee = normalizeMoneyInput(value(formData, "totalCostWithFee"));
-  const commissionTotal = normalizeMoneyInput(value(formData, "commissionTotal"));
+  const rawLineItems = value(formData, "lineItems");
+  const rawPayments = value(formData, "payments");
 
   if (!participantId || !campaignId || !requestDate || !participantName || !participantEmail || !newsletterCampaign) {
     return {
@@ -663,18 +666,34 @@ export async function updateAssignmentOpportunitySummaryAction(
     };
   }
 
-  if (Number(totalCostWithFee) < Number(totalProductCost)) {
+  let lineItems: ReturnType<typeof normalizeLineItem>[];
+  let payments: ReturnType<typeof normalizePayments>;
+  try {
+    const parsedLineItems = JSON.parse(rawLineItems ?? "[]") as Array<Record<string, string>>;
+    lineItems = parsedLineItems.map((item) => normalizeLineItem(item)).filter(isMeaningfulLineItem);
+    payments = normalizePayments(JSON.parse(rawPayments ?? "{}") as Record<string, string>);
+  } catch {
+    return {
+      status: "error",
+      message: "The assignment form could not be parsed."
+    };
+  }
+
+  if (!lineItems.length) {
+    return {
+      status: "error",
+      message: "Add at least one product row before saving the assignment."
+    };
+  }
+
+  if (Number(payments.totalCostWithFee) < Number(payments.totalProductCost)) {
     return {
       status: "error",
       message: "Total cost + PP fee must be greater than or equal to total product cost."
     };
   }
 
-  const ppFee = (Number(totalCostWithFee) - Number(totalProductCost)).toFixed(2);
-  const redirectTo = `/admin/assignments/${encodeURIComponent(
-    buildOpportunityGroupId(participantId, campaignId, newsletterCampaign, requestDate)
-  )}`;
-
+  const redirectTo = "/admin/assignments";
   const payload = {
     participantId,
     campaignId,
@@ -685,12 +704,12 @@ export async function updateAssignmentOpportunitySummaryAction(
     participantEmail,
     paypalEmail,
     newsletterCampaign,
+    miscNotes,
     opportunityStatus,
     fullPaymentDate,
-    totalProductCost,
-    totalCostWithFee,
-    ppFee,
-    commissionTotal
+    commissionPaymentDate,
+    lineItems,
+    payments
   };
 
   try {
@@ -742,74 +761,228 @@ export async function updateAssignmentOpportunitySummaryAction(
               deliverables: {
                 ...((campaign.deliverables as Record<string, any> | null) ?? {}),
                 requestDate: payload.requestDate,
-                payments: {
-                  totalProductCost: payload.totalProductCost,
-                  ppFee: payload.ppFee,
-                  totalCostWithFee: payload.totalCostWithFee,
-                  commission: payload.commissionTotal,
-                  commissionMisc: "0.00",
-                  totalCommission: payload.commissionTotal
-                }
+                payments: payload.payments
               },
               startDate: new Date(payload.requestDate)
             }
           });
 
-          const assignments = await tx.assignment.findMany({
+          const existingAssignments = await tx.assignment.findMany({
             where: {
               id: {
                 in: payload.assignmentIds
               }
             },
             include: {
-              submissions: true
+              submissions: true,
+              product: true
             }
           });
 
-          if (!assignments.length) {
+          if (!existingAssignments.length) {
             throw new Error("Assignment records not found.");
           }
 
-          for (const assignment of assignments) {
-            const snapshot = ((assignment.deliverableSnapshot as Record<string, any> | null) ?? {});
-            await tx.assignment.update({
-              where: { id: assignment.id },
-              data: {
-                status: mapOpportunityStatusToAssignmentStatus(payload.opportunityStatus as never) as never,
-                assignedAt: new Date(payload.requestDate),
-                submittedAt: assignment.submissions.length ? new Date(payload.requestDate) : assignment.submittedAt,
-                approvedAt: ["SENT", "PAID"].includes(payload.opportunityStatus)
-                  ? payoutDateOrNull(payload.fullPaymentDate)
-                  : null,
-                sourceLabel: payload.newsletterCampaign,
-                deliverableSnapshot: {
-                  ...snapshot,
-                  legacyRequestDate: payload.requestDate,
-                  payments: {
-                    totalProductCost: payload.totalProductCost,
-                    ppFee: payload.ppFee,
-                    totalCostWithFee: payload.totalCostWithFee,
-                    commission: payload.commissionTotal,
-                    commissionMisc: "0.00",
-                    totalCommission: payload.commissionTotal
+          const assignmentById = new Map(existingAssignments.map((assignment) => [assignment.id, assignment]));
+          const orderedAssignments = payload.assignmentIds
+            .map((assignmentId) => assignmentById.get(assignmentId))
+            .filter((assignment): assignment is (typeof existingAssignments)[number] => Boolean(assignment));
+
+          const approvedAt = ["SENT", "PAID"].includes(payload.opportunityStatus)
+            ? payoutDateOrNull(payload.fullPaymentDate)
+            : null;
+          const reviewedAt = ["SENT", "PAID"].includes(payload.opportunityStatus)
+            ? payoutDateOrNull(payload.fullPaymentDate)
+            : null;
+
+          let primaryAssignmentId: string | null = null;
+
+          for (const [index, lineItem] of payload.lineItems.entries()) {
+            const existingAssignment = orderedAssignments[index] ?? null;
+            const marketplace = inferMarketplaceFromUrl(lineItem.productLink);
+            let productRecord: any = existingAssignment?.product ?? null;
+
+            if (productRecord) {
+              productRecord = await tx.product.update({
+                where: { id: productRecord.id },
+                data: {
+                  brandName: lineItem.brand || null,
+                  title: lineItem.productTitle || "Untitled product",
+                  amazonUrl: lineItem.productLink || null,
+                  marketplace
+                }
+              });
+            } else {
+              const asin =
+                parseAmazonAsin(lineItem.productLink) ??
+                productAsinSeed(`${lineItem.brand}-${lineItem.productTitle}-${payload.requestDate}-${index}`);
+
+              productRecord = await tx.product.findFirst({
+                where: {
+                  organizationId: campaign.organizationId,
+                  asin,
+                  marketplace
+                }
+              });
+
+              if (!productRecord) {
+                productRecord = await tx.product.create({
+                  data: {
+                    organizationId: campaign.organizationId,
+                    brandName: lineItem.brand || null,
+                    asin,
+                    title: lineItem.productTitle || "Untitled product",
+                    amazonUrl: lineItem.productLink || null,
+                    marketplace
                   }
+                });
+              }
+            }
+
+            await tx.campaignProduct.upsert({
+              where: {
+                campaignId_productId: {
+                  campaignId: campaign.id,
+                  productId: productRecord.id
+                }
+              },
+              update: {},
+              create: {
+                campaignId: campaign.id,
+                productId: productRecord.id
+              }
+            });
+
+            const assignmentData = {
+              productId: productRecord.id,
+              status: mapOpportunityStatusToAssignmentStatus(payload.opportunityStatus as never) as never,
+              assignedAt: new Date(payload.requestDate),
+              submittedAt: lineItem.reviewProductLink ? new Date(payload.requestDate) : null,
+              approvedAt,
+              sourceLabel: payload.newsletterCampaign,
+              baseRewardAmount: lineItem.productCost,
+              purchaseSubtotal: lineItem.productCost,
+              internalNotes: payload.miscNotes ?? null,
+              deliverableSnapshot: {
+                ...(((existingAssignment?.deliverableSnapshot as Record<string, any> | null) ?? {})),
+                source: "assignment-set-form",
+                legacyRequestDate: payload.requestDate,
+                productLink: lineItem.productLink || null,
+                reviewProductLink: lineItem.reviewProductLink || null,
+                payments: payload.payments
+              }
+            };
+
+            const syncedAssignment = existingAssignment
+              ? await tx.assignment.update({
+                  where: { id: existingAssignment.id },
+                  data: assignmentData
+                })
+              : await tx.assignment.create({
+                  data: {
+                    campaignId: campaign.id,
+                    participantId: payload.participantId,
+                    ...(systemUser ? { assignedById: systemUser.id } : {}),
+                    rewardCurrency: "USD",
+                    ...assignmentData
+                  }
+                });
+
+            const existingSubmissions = existingAssignment?.submissions ?? [];
+            const [firstSubmission, ...extraSubmissions] = existingSubmissions;
+
+            if (lineItem.reviewProductLink) {
+              if (firstSubmission) {
+                await tx.submission.update({
+                  where: { id: firstSubmission.id },
+                  data: {
+                    externalLinks: {
+                      ...((firstSubmission.externalLinks as Record<string, any> | null) ?? {}),
+                      legacyReviewUrl: lineItem.reviewProductLink
+                    },
+                    decision: ["SENT", "PAID"].includes(payload.opportunityStatus) ? "APPROVED" : "PENDING",
+                    reviewedAt,
+                    reviewedById: ["SENT", "PAID"].includes(payload.opportunityStatus) ? systemUser?.id ?? null : null,
+                    submittedAt: new Date(payload.requestDate)
+                  }
+                });
+              } else {
+                await tx.submission.create({
+                  data: {
+                    assignmentId: syncedAssignment.id,
+                    submittedById: payload.participantId,
+                    version: 1,
+                    externalLinks: {
+                      legacyReviewUrl: lineItem.reviewProductLink
+                    },
+                    decision: ["SENT", "PAID"].includes(payload.opportunityStatus) ? "APPROVED" : "PENDING",
+                    reviewedAt,
+                    reviewedById: ["SENT", "PAID"].includes(payload.opportunityStatus) ? systemUser?.id ?? null : null,
+                    submittedAt: new Date(payload.requestDate)
+                  }
+                });
+              }
+
+              if (extraSubmissions.length) {
+                await tx.submission.deleteMany({
+                  where: {
+                    id: {
+                      in: extraSubmissions.map((submission) => submission.id)
+                    }
+                  }
+                });
+              }
+            } else if (existingSubmissions.length) {
+              await tx.submission.deleteMany({
+                where: {
+                  assignmentId: syncedAssignment.id
+                }
+              });
+            }
+
+            if (!primaryAssignmentId) {
+              primaryAssignmentId = syncedAssignment.id;
+            }
+          }
+
+          if (!primaryAssignmentId) {
+            throw new Error("No assignment records were created.");
+          }
+
+          const removedAssignments = orderedAssignments.slice(payload.lineItems.length);
+          if (removedAssignments.length) {
+            const removedAssignmentIds = removedAssignments.map((assignment) => assignment.id);
+            if (payload.payoutIds.length) {
+              await tx.payout.updateMany({
+                where: {
+                  id: {
+                    in: payload.payoutIds
+                  },
+                  assignmentId: {
+                    in: removedAssignmentIds
+                  }
+                },
+                data: {
+                  assignmentId: primaryAssignmentId
+                }
+              });
+            }
+
+            await tx.submission.deleteMany({
+              where: {
+                assignmentId: {
+                  in: removedAssignmentIds
                 }
               }
             });
 
-            for (const submission of assignment.submissions) {
-              await tx.submission.update({
-                where: { id: submission.id },
-                data: {
-                  decision: ["SENT", "PAID"].includes(payload.opportunityStatus) ? "APPROVED" : "PENDING",
-                  reviewedAt: ["SENT", "PAID"].includes(payload.opportunityStatus)
-                    ? payoutDateOrNull(payload.fullPaymentDate)
-                    : null,
-                  reviewedById: ["SENT", "PAID"].includes(payload.opportunityStatus) ? systemUser?.id ?? null : null,
-                  submittedAt: new Date(payload.requestDate)
+            await tx.assignment.deleteMany({
+              where: {
+                id: {
+                  in: removedAssignmentIds
                 }
-              });
-            }
+              }
+            });
           }
 
           const existingPayouts = payload.payoutIds.length
@@ -823,107 +996,120 @@ export async function updateAssignmentOpportunitySummaryAction(
             : [];
 
           const reimbursementPayouts = existingPayouts.filter((payout) => payout.payoutType === "base_reimbursement");
-          const commissionPayouts = existingPayouts.filter((payout) =>
-            ["bonus_commission", "commission_misc"].includes(String(payout.payoutType ?? ""))
-          );
+          const commissionPayouts = existingPayouts.filter((payout) => payout.payoutType === "bonus_commission");
+          const commissionMiscPayouts = existingPayouts.filter((payout) => payout.payoutType === "commission_misc");
           const basePaymentDate = payoutDateForStatus(payload.fullPaymentDate, payload.requestDate);
+          const commissionPaymentDateValue = payoutDateForStatus(
+            payload.commissionPaymentDate,
+            payload.fullPaymentDate ?? payload.requestDate
+          );
           const paymentStatus = payload.opportunityStatus as never;
 
-          if (reimbursementPayouts.length) {
-            const [first, ...rest] = reimbursementPayouts;
-            await tx.payout.update({
-              where: { id: first.id },
-              data: {
-                status: paymentStatus,
-                amount: payload.totalProductCost,
-                feeAmount: payload.ppFee,
-                recipientEmail: payload.paypalEmail ?? payload.participantEmail,
-                scheduledAt: basePaymentDate,
-                sentAt: ["SENT", "PAID"].includes(payload.opportunityStatus) ? basePaymentDate : null,
-                settledAt: payload.opportunityStatus === "PAID" ? basePaymentDate : null,
-                failureReason: payload.opportunityStatus === "FAILED" ? "Updated from assignment detail." : null
-              }
-            });
+          const syncPayout = async ({
+            payouts,
+            payoutType,
+            amount,
+            feeAmount,
+            scheduledAt
+          }: {
+            payouts: typeof existingPayouts;
+            payoutType: "base_reimbursement" | "bonus_commission" | "commission_misc";
+            amount: string;
+            feeAmount?: string;
+            scheduledAt: Date;
+          }) => {
+            const normalizedAmount = normalizeMoneyInput(amount);
+            const normalizedFee = feeAmount === undefined ? undefined : normalizeMoneyInput(feeAmount);
+            const shouldKeep = Number(normalizedAmount) > 0 || Number(normalizedFee ?? 0) > 0;
+            const sentAt = ["SENT", "PAID"].includes(payload.opportunityStatus) ? scheduledAt : null;
+            const settledAt = payload.opportunityStatus === "PAID" ? scheduledAt : null;
+            const failureReason = payload.opportunityStatus === "FAILED" ? "Updated from assignment detail." : null;
 
-            for (const payout of rest) {
+            if (payouts.length) {
+              const [first, ...rest] = payouts;
               await tx.payout.update({
-                where: { id: payout.id },
+                where: { id: first.id },
                 data: {
+                  assignmentId: primaryAssignmentId,
                   status: paymentStatus,
-                  amount: "0.00",
-                  feeAmount: "0.00",
+                  amount: normalizedAmount,
+                  feeAmount: payoutType === "base_reimbursement" ? normalizedFee ?? "0.00" : null,
                   recipientEmail: payload.paypalEmail ?? payload.participantEmail,
-                  sentAt: ["SENT", "PAID"].includes(payload.opportunityStatus) ? basePaymentDate : null,
-                  settledAt: payload.opportunityStatus === "PAID" ? basePaymentDate : null,
-                  failureReason: payload.opportunityStatus === "FAILED" ? "Merged into grouped assignment total." : null
+                  scheduledAt,
+                  sentAt,
+                  settledAt,
+                  failureReason
                 }
               });
+
+              for (const payout of rest) {
+                await tx.payout.update({
+                  where: { id: payout.id },
+                  data: {
+                    assignmentId: primaryAssignmentId,
+                    status: paymentStatus,
+                    amount: "0.00",
+                    feeAmount: payoutType === "base_reimbursement" ? "0.00" : null,
+                    recipientEmail: payload.paypalEmail ?? payload.participantEmail,
+                    scheduledAt,
+                    sentAt,
+                    settledAt,
+                    failureReason: payload.opportunityStatus === "FAILED"
+                      ? "Merged into grouped assignment total."
+                      : null
+                  }
+                });
+              }
+
+              return;
             }
-          } else if (Number(payload.totalProductCost) > 0 || Number(payload.ppFee) > 0) {
+
+            if (!shouldKeep) {
+              return;
+            }
+
             await tx.payout.create({
               data: {
-                assignmentId: assignments[0].id,
+                assignmentId: primaryAssignmentId,
                 participantId: payload.participantId,
                 createdById: systemUser?.id ?? null,
                 status: paymentStatus,
-                payoutType: "base_reimbursement",
-                amount: payload.totalProductCost,
-                feeAmount: payload.ppFee,
+                payoutType,
+                amount: normalizedAmount,
+                feeAmount: payoutType === "base_reimbursement" ? normalizedFee ?? "0.00" : null,
                 recipientEmail: payload.paypalEmail ?? payload.participantEmail,
                 provider: "PAYPAL",
-                scheduledAt: basePaymentDate,
-                sentAt: ["SENT", "PAID"].includes(payload.opportunityStatus) ? basePaymentDate : null,
-                settledAt: payload.opportunityStatus === "PAID" ? basePaymentDate : null,
-                failureReason: payload.opportunityStatus === "FAILED" ? "Created from assignment detail." : null
+                scheduledAt,
+                sentAt,
+                settledAt,
+                failureReason: payload.opportunityStatus === "FAILED"
+                  ? "Created from assignment detail."
+                  : null
               }
             });
-          }
+          };
 
-          if (commissionPayouts.length) {
-            const [firstCommission, ...restCommission] = commissionPayouts;
-            await tx.payout.update({
-              where: { id: firstCommission.id },
-              data: {
-                status: paymentStatus,
-                amount: payload.commissionTotal,
-                recipientEmail: payload.paypalEmail ?? payload.participantEmail,
-                sentAt: ["SENT", "PAID"].includes(payload.opportunityStatus) ? basePaymentDate : null,
-                settledAt: payload.opportunityStatus === "PAID" ? basePaymentDate : null,
-                failureReason: payload.opportunityStatus === "FAILED" ? "Updated from assignment detail." : null
-              }
-            });
+          await syncPayout({
+            payouts: reimbursementPayouts,
+            payoutType: "base_reimbursement",
+            amount: payload.payments.totalProductCost,
+            feeAmount: payload.payments.ppFee,
+            scheduledAt: basePaymentDate
+          });
 
-            for (const payout of restCommission) {
-              await tx.payout.update({
-                where: { id: payout.id },
-                data: {
-                  status: paymentStatus,
-                  amount: "0.00",
-                  recipientEmail: payload.paypalEmail ?? payload.participantEmail,
-                  sentAt: ["SENT", "PAID"].includes(payload.opportunityStatus) ? basePaymentDate : null,
-                  settledAt: payload.opportunityStatus === "PAID" ? basePaymentDate : null,
-                  failureReason: payload.opportunityStatus === "FAILED" ? "Merged into grouped assignment total." : null
-                }
-              });
-            }
-          } else if (Number(payload.commissionTotal) > 0) {
-            await tx.payout.create({
-              data: {
-                assignmentId: assignments[0].id,
-                participantId: payload.participantId,
-                createdById: systemUser?.id ?? null,
-                status: paymentStatus,
-                payoutType: "bonus_commission",
-                amount: payload.commissionTotal,
-                recipientEmail: payload.paypalEmail ?? payload.participantEmail,
-                provider: "PAYPAL",
-                scheduledAt: basePaymentDate,
-                sentAt: ["SENT", "PAID"].includes(payload.opportunityStatus) ? basePaymentDate : null,
-                settledAt: payload.opportunityStatus === "PAID" ? basePaymentDate : null,
-                failureReason: payload.opportunityStatus === "FAILED" ? "Created from assignment detail." : null
-              }
-            });
-          }
+          await syncPayout({
+            payouts: commissionPayouts,
+            payoutType: "bonus_commission",
+            amount: payload.payments.commission,
+            scheduledAt: commissionPaymentDateValue
+          });
+
+          await syncPayout({
+            payouts: commissionMiscPayouts,
+            payoutType: "commission_misc",
+            amount: payload.payments.commissionMisc,
+            scheduledAt: commissionPaymentDateValue
+          });
         });
       },
       async () => {
@@ -932,7 +1118,6 @@ export async function updateAssignmentOpportunitySummaryAction(
     );
 
     revalidateAdminPaths();
-    revalidatePath(redirectTo);
 
     return {
       status: "success",
@@ -946,6 +1131,7 @@ export async function updateAssignmentOpportunitySummaryAction(
     };
   }
 }
+
 export async function createPayoutAction(formData: FormData) {
   const assignmentId = value(formData, "assignmentId");
   const participantId = value(formData, "participantId");
@@ -993,6 +1179,7 @@ export async function createPayoutAction(formData: FormData) {
 
   revalidateAdminPaths();
 }
+
 
 
 

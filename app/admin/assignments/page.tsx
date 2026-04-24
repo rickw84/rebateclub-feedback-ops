@@ -46,6 +46,23 @@ function sortHref(
   return withParams(params, { sort: key, dir: nextDir });
 }
 
+function formatAssignmentQueueStatus(status: string) {
+  switch (status) {
+    case "DRAFT":
+      return "Not Paid";
+    case "SENT":
+      return "Product Payment Made";
+    case "PAID":
+      return "Assignment Completed (Review+Commission)";
+    case "FAILED":
+      return "Assignment Not Completed (Block/Blacklist)";
+    case "CANCELED":
+      return "Canceled";
+    default:
+      return status;
+  }
+}
+
 export default async function AssignmentsPage({ searchParams }: AssignmentsPageProps) {
   const session = await getServerSession();
   const params = (await searchParams) ?? {};
@@ -54,11 +71,10 @@ export default async function AssignmentsPage({ searchParams }: AssignmentsPageP
 
   const statusTabs = [
     { label: "All Assignments", status: "", count: listing.tabs.all },
-    { label: "Needs Approval", status: "DRAFT", count: listing.tabs.needsApproval },
-    { label: "Sent", status: "SENT", count: listing.tabs.sent },
-    { label: "Paid", status: "PAID", count: listing.tabs.paid },
-    { label: "Failed", status: "FAILED", count: listing.tabs.failed },
-    { label: "Canceled", status: "CANCELED", count: listing.tabs.canceled }
+    { label: "Not Paid", status: "DRAFT", count: listing.tabs.needsApproval },
+    { label: "Assignment Not Completed (Block/Blacklist)", status: "FAILED", count: listing.tabs.failed },
+    { label: "Product Payment Made", status: "SENT", count: listing.tabs.sent },
+    { label: "Assignment Completed (Review+Commission)", status: "PAID", count: listing.tabs.paid }
   ];
 
   return (
@@ -210,7 +226,7 @@ export default async function AssignmentsPage({ searchParams }: AssignmentsPageP
                         <span
                           className={`badge ${row.status === "PAID" ? "good" : row.status === "FAILED" ? "alert" : "warn"}`}
                         >
-                          {row.status}
+                          {formatAssignmentQueueStatus(row.status)}
                         </span>
                       </td>
                     </tr>
@@ -238,4 +254,5 @@ export default async function AssignmentsPage({ searchParams }: AssignmentsPageP
     </AppShell>
   );
 }
+
 

@@ -22,7 +22,7 @@ export default async function AssignmentOpportunityDetailPage({
     <AppShell
       title="Assignment Detail"
       kicker="Operations Queue"
-      description="Grouped assignment opportunity with products, review links, and related payouts."
+      description="Edit the assignment set using the same layout as the New Assignment form."
       links={[
         { href: "/admin", label: "Dashboard" },
         { href: "/admin/assignments", label: "Back to Assignments" },
@@ -44,87 +44,15 @@ export default async function AssignmentOpportunityDetailPage({
         <article className="rk-panel">
           <div className="rk-panel-header">
             <div>
-              <div className="rk-section-title">Assignment opportunity summary</div>
+              <div className="rk-section-title">Edit assignment set</div>
               <p className="muted">
-                Edit the grouped parent record for this review opportunity here.
+                Update the grouped assignment details, payment fields, and product rows here.
               </p>
             </div>
           </div>
 
           <AssignmentOpportunitySummaryForm detail={detail} />
         </article>
-
-        <div className="grid-two">
-          <article className="rk-panel">
-            <div className="rk-panel-header">
-              <div className="rk-section-title">Products in this assignment</div>
-            </div>
-            <div className="rk-table-wrap with-top-border">
-              <table className="rk-table">
-                <thead>
-                  <tr>
-                    <th>Brand</th>
-                    <th>Product</th>
-                    <th>Product Cost</th>
-                    <th>Review Link</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detail.assignmentRows.map((assignment: any) => (
-                    <tr key={assignment.id}>
-                      <td>{assignment.brandName}</td>
-                      <td>{assignment.productTitle}</td>
-                      <td>{assignment.purchaseSubtotalLabel}</td>
-                      <td>
-                        {assignment.reviewLinks?.length ? (
-                          <div className="rk-id-stack">
-                            {assignment.reviewLinks.map((reviewLink: string) => (
-                              <a className="rk-id-link" href={reviewLink} key={reviewLink} target="_blank">
-                                Open review
-                              </a>
-                            ))}
-                          </div>
-                        ) : (
-                          "No link"
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </article>
-
-          <article className="rk-panel">
-            <div className="rk-panel-header">
-              <div className="rk-section-title">Related payouts</div>
-            </div>
-            <div className="rk-table-wrap with-top-border">
-              <table className="rk-table">
-                <thead>
-                  <tr>
-                    <th>Payment ID</th>
-                    <th>Type</th>
-                    <th>Amount</th>
-                    <th>Status</th>
-                    <th>Payment Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detail.payoutRows.map((payout: any) => (
-                    <tr key={payout.id}>
-                      <td>{payout.id}</td>
-                      <td>{payout.payoutTypeLabel}</td>
-                      <td>{payout.amountLabel}</td>
-                      <td>{payout.status}</td>
-                      <td>{payout.paymentDateLabel}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </article>
-        </div>
       </section>
     </AppShell>
   );

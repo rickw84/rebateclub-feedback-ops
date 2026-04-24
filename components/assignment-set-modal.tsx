@@ -25,6 +25,7 @@ type AssignmentDetails = {
   newsletterCampaign: string;
   fullPaymentDate: string;
   commissionPaymentDate: string;
+  miscNotes: string;
 };
 
 function emptyLineItem(): AssignmentSetLineItem {
@@ -46,7 +47,8 @@ function defaultDetails(): AssignmentDetails {
     paypalEmail: "",
     newsletterCampaign: "",
     fullPaymentDate: "",
-    commissionPaymentDate: ""
+    commissionPaymentDate: "",
+    miscNotes: ""
   };
 }
 
@@ -66,6 +68,7 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const [details, setDetails] = useState<AssignmentDetails>(defaultDetails);
   const [payments, setPayments] = useState<AssignmentSetPayments>(defaultPayments);
   const [lineItems, setLineItems] = useState<AssignmentSetLineItem[]>([emptyLineItem()]);
@@ -94,10 +97,7 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
 
   useEffect(() => {
     if (state.status === "success") {
-      setOpen(false);
-      setDetails(defaultDetails());
-      setPayments(defaultPayments());
-      setLineItems([emptyLineItem()]);
+      setIsRedirecting(true);
 
       if (state.flashAssignmentId) {
         const nextParams = new URLSearchParams(searchParams.toString());
@@ -105,6 +105,7 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
         const nextQuery = nextParams.toString();
         const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
         router.replace(nextUrl, { scroll: false });
+        router.refresh();
       } else {
         router.refresh();
       }
@@ -112,19 +113,45 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
   }, [pathname, router, searchParams, state.flashAssignmentId, state.status]);
 
   useEffect(() => {
+    if (!isRedirecting || state.status !== "success") {
+      return undefined;
+    }
+
+    const flashApplied = state.flashAssignmentId
+      ? searchParams.get("flash") === state.flashAssignmentId
+      : true;
+
+    if (!flashApplied) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      setOpen(false);
+      setIsRedirecting(false);
+      setDetails(defaultDetails());
+      setPayments(defaultPayments());
+      setLineItems([emptyLineItem()]);
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [isRedirecting, searchParams, state.flashAssignmentId, state.status]);
+
+  useEffect(() => {
     if (!open) {
       return undefined;
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !pending) {
+      if (event.key === "Escape" && !pending && !isRedirecting) {
         setOpen(false);
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, pending]);
+  }, [isRedirecting, open, pending]);
+
+  const isBusy = pending || isRedirecting;
 
   const updateDetail = (key: keyof AssignmentDetails, value: string) => {
     setDetails((current) => ({
@@ -175,13 +202,24 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
           aria-modal="true"
           className="rk-modal-backdrop"
           onClick={() => {
-            if (!pending) {
+            if (!isBusy) {
               setOpen(false);
             }
           }}
           role="dialog"
         >
           <div className="rk-modal-card" onClick={(event) => event.stopPropagation()}>
+            {isRedirecting ? (
+              <div className="page-loading-shell">
+                <div className="page-loading-card">
+                  <span className="global-spinner" aria-hidden="true" />
+                  <div className="page-loading-copy">
+                    <strong>Saving assignment set</strong>
+                    <span>Returning to the Assignment Queue...</span>
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <div className="rk-modal-header">
               <div>
                 <div className="eyebrow">Assignment Set</div>
@@ -193,7 +231,7 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
               <button
                 aria-label="Close assignment form"
                 className="button-link"
-                disabled={pending}
+                disabled={isBusy}
                 onClick={() => setOpen(false)}
                 type="button"
               >
@@ -269,7 +307,15 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
                         value={details.newsletterCampaign}
                       />
                     </label>
-
+                    <label className="field rk-modal-grid-span">
+                      Misc Notes
+                      <textarea
+                        name="miscNotes"
+                        onChange={(event) => updateDetail("miscNotes", event.target.value)}
+                        placeholder="Add any assignment notes, exceptions, or follow-up context."
+                        value={details.miscNotes}
+                      />
+                    </label>
                   </div>
                   <datalist id="assignment-campaign-suggestions">
                     {campaignSuggestions.map((campaign) => (
@@ -424,10 +470,13 @@ export function AssignmentSetModal({ campaignSuggestions }: AssignmentSetModalPr
               {state.status === "error" ? <div className="rk-form-error">{state.message}</div> : null}
 
               <div className="rk-modal-footer">
-                <button className="button-link" disabled={pending} onClick={() => setOpen(false)} type="button">
+                <button className="button-link" disabled={isBusy} onClick={() => setOpen(false)} type="button">
                   Cancel
                 </button>
-                <SubmitButton className="hero-link primary" pendingLabel="Saving assignments...">
+                <SubmitButton
+                  className="hero-link primary"
+                  pendingLabel={isRedirecting ? "Returning to queue..." : "Saving assignments..."}
+                >
                   Save assignment set
                 </SubmitButton>
               </div>
